@@ -248,15 +248,16 @@ def fetch_and_parse():
 
     os.makedirs("data", exist_ok=True)
     csv_path = "data/hansard_mentions.csv"
-    html_path = "data/daily_report.html"
+    
+    # Save report to root directory as index.html for direct GitHub Pages rendering
+    html_path = "index.html"
 
     df_new = pd.DataFrame(results) if results else pd.DataFrame(columns=["sitting_date", "source", "speaker", "matched_term", "context_snippet", "quote_url"])
 
-    # Strict structure check to filter old CSV layouts
+    # Clean and merge CSV data
     if os.path.exists(csv_path):
         try:
             existing_df = pd.read_csv(csv_path)
-            # If the CSV has legacy structure or missing 'sitting_date', wipe it and start clean
             if "sitting_date" not in existing_df.columns or existing_df["sitting_date"].isna().any():
                 combined_df = df_new
             else:
@@ -269,11 +270,11 @@ def fetch_and_parse():
     else:
         df_new.to_csv(csv_path, index=False)
 
-    # Rebuild HTML report cleanly
+    # Rebuild index.html report cleanly
     if os.path.exists(csv_path):
         full_df = pd.read_csv(csv_path)
         generate_styled_html(full_df, html_path)
-        print(f"\n Clean history report regenerated ({len(full_df)} total mentions): {html_path}")
+        print(f"\n Clean history report generated: {html_path}")
 
 if __name__ == "__main__":
     fetch_and_parse()
