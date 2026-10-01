@@ -1,0 +1,40 @@
+name: Daily Parliamentary Sector Monitor
+
+on:
+  schedule:
+    - cron: '0 12 * * 1-5'
+  workflow_dispatch:
+
+jobs:
+  run-monitor:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests beautifulsoup4 pandas
+
+      - name: Create Data Directory
+        run: mkdir -p data
+
+      - name: Execute Hansard Scraper
+        run: python scripts/search_hansard_v2.py
+
+      - name: Commit and Push Updated Data
+        run: |
+          git config --global user.name "GitHub Action Bot"
+          git config --global user.email "action@github.com"
+          git add .
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Automated daily Hansard update" && git push)
