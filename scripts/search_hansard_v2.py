@@ -116,7 +116,7 @@ def generate_styled_html(df: pd.DataFrame, output_file: str):
     <body>
         <h2>🇨🇦 Federal Parliamentary Sector Monitoring History</h2>
         <div class="summary">
-            Total Accumulated Mentions: <strong>{len(df)}</strong> | Last Updated: <strong>{datetime.now().strftime('%Y-%m-%d %H:%M')}</strong>
+            Total Accumulated Mentions: <strong>{len(df)}</strong> | Last Updated: <strong>{datetime.now().strftime('%Y-%m-%d %H:%M')} EST</strong>
         </div>
         <table>
             <colgroup>
@@ -172,7 +172,8 @@ def fetch_and_parse():
         
         session = requests.Session()
         try:
-            resp = session.get(source["url"], headers=HEADERS, timeout=12)
+            # Set short timeout & allow fallback if source site is unresponsive
+            resp = session.get(source["url"], headers=HEADERS, timeout=8)
             resp.raise_for_status()
         except Exception as e:
             print(f"  [NOTICE] Connection skipped for {source['name']}: {e}")
@@ -248,13 +249,11 @@ def fetch_and_parse():
 
     os.makedirs("data", exist_ok=True)
     csv_path = "data/hansard_mentions.csv"
-    
-    # Save report to root directory as index.html for direct GitHub Pages rendering
     html_path = "index.html"
 
     df_new = pd.DataFrame(results) if results else pd.DataFrame(columns=["sitting_date", "source", "speaker", "matched_term", "context_snippet", "quote_url"])
 
-    # Clean and merge CSV data
+    # Load existing historical data and append new records cleanly
     if os.path.exists(csv_path):
         try:
             existing_df = pd.read_csv(csv_path)
@@ -274,7 +273,7 @@ def fetch_and_parse():
     if os.path.exists(csv_path):
         full_df = pd.read_csv(csv_path)
         generate_styled_html(full_df, html_path)
-        print(f"\n Clean history report generated: {html_path}")
+        print(f"\n Clean history report generated ({len(full_df)} total mentions): {html_path}")
 
 if __name__ == "__main__":
     fetch_and_parse()
