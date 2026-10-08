@@ -37,5 +37,7 @@ jobs:
         run: |
           git config --global user.name "GitHub Action Bot"
           git config --global user.email "action@github.com"
-          git add data/hansard_mentions.csv index.html .nojekyll
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Automated daily Hansard update" && git push)
+          git add data/hansard_mentions.csv index.html .nojekyll || true
+          git commit -m "Automated daily Hansard update" || exit 0
+          git pull --rebase origin main
+          git push
