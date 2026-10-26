@@ -5,10 +5,14 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
 
-# 1. Target Endpoints
+# Base URL for Canadian Parliament Hansard publications
+BASE_URL = "https://www.ourcommons.ca"
+PUBLICATION_LIST_URL = "https://www.ourcommons.ca/documentviewer/en/house/44-1/hansard"
+
+# Fallback direct endpoints
 SOURCES = [
     {
-        "name": "House of Commons (Hansard)",
+        "name": "House of Commons (Latest)",
         "url": "https://www.ourcommons.ca/documentviewer/en/house/latest/hansard",
     },
     {
@@ -17,15 +21,16 @@ SOURCES = [
     }
 ]
 
-# 2. Targeted Keywords
+# Targeted Keywords
 KEYWORDS = [
-    r"\bcharit(y|ies|able)\b",
-    r"\bvolunt(eer|eers|ary|eerism)\b",
-    r"\bNGOs?\b",
-    r"\bnon-?profits?\b",
-    r"\bnot-for-profits?\b",
-    r"\bnon-governmental\b",
-    r"\bdonations?\b",
+    r"\bcharit(y|ies|able|ables)\b",
+    r"\bvolunt(eer|eers|eers'|ary|eerism)\b",
+    r"\bNGOs?'?\b",
+    r"\bnon-?for-?profits?'?\b",
+    r"\bnot-?for-?profits?'?\b",
+    r"\bnon-?profits?'?\b",
+    r"\bnon-?governmental\b",
+    r"\bdonations?'?\b",
     r"\bnon-?profit sector\b",
     r"\bnot-for-profit sector\b",
     r"\bcharitable sector\b",
@@ -34,16 +39,16 @@ KEYWORDS = [
     r"\bcommunity (organization|organizations|group|groups)\b",
     r"\blocal (organization|organizations)\b",
     r"\bfaith (group|groups)\b",
-    r"\bservice providers?\b",
-    r"\bfood banks?\b",
-    r"\bsocial enterprises?\b",
-    r"\bgrant recipients?\b",
+    r"\bservice providers?'?\b",
+    r"\bfood banks?'?\b",
+    r"\bsocial enterprises?'?\b",
+    r"\bgrant recipients?'?\b",
     r"\bbeneficiar(y|ies)\b",
     r"\bsettlement services\b"
 ]
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
     "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
 }
 
@@ -53,12 +58,10 @@ SPEAKER_PATTERN = re.compile(
 )
 
 def clean_text(text: str) -> str:
-    """Normalize whitespace."""
     return " ".join(text.split())
 
 def extract_sitting_date(soup) -> str:
-    """Extract official parliamentary sitting date from page header."""
-    header_text = soup.get_text()[:3000]
+    header_text = soup.get_text()[:4000]
     date_match = re.search(
         r'(January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}',
         header_text
@@ -68,7 +71,6 @@ def extract_sitting_date(soup) -> str:
     return datetime.now().strftime("%B %d, %Y")
 
 def extract_speaker_name(tag) -> str:
-    """Extract speaker name from intervention header elements."""
     speaker_node = tag.find(class_=re.compile(r"speaker|member-name|person", re.I))
     if speaker_node:
         name = clean_text(speaker_node.get_text())
@@ -81,8 +83,29 @@ def extract_speaker_name(tag) -> str:
 
     return "Unknown Speaker"
 
+def get_recent_hansard_urls(session, max_issues=8):
+    """Scrapes the publication list to gather the last N sitting publications."""
+    urls = []
+    try:
+        resp = session.get(PUBLICATION_LIST_URL, headers=HEADERS, timeout=20)
+        if resp.status_code == 200:
+            soup = BeautifulSoup(resp.text, "html.parser")
+            # Locate publication links inside selector dropdown or document index
+            for a in soup.find_all("a", href=re.compile(r"/documentviewer/en/house/\d+-\d+/hansard/\d+", re.I)):
+                full_url = a["href"] if a["href"].startswith("http") else f"{BASE_URL}{a['href']}"
+                if full_url not in urls:
+                    urls.append(full_url)
+                if len(urls) >= max_issues:
+                    break
+    except Exception as e:
+        print(f"Notice: Could not dynamically list publications: {e}")
+
+    # Fallback to default sources if list parsing returns empty
+    if not urls:
+        urls = [s["url"] for s in SOURCES if "house" in s["name"].lower()]
+    return urls
+
 def generate_styled_html(df: pd.DataFrame, output_file: str):
-    """Generate a clean HTML report with direct links to interventions."""
     html_content = f"""
     <!DOCTYPE html>
     <html>
@@ -97,18 +120,14 @@ def generate_styled_html(df: pd.DataFrame, output_file: str):
             th, td {{ border: 1px solid #dee2e6; padding: 10px 12px; text-align: left; vertical-align: top; font-size: 14px; word-wrap: break-word; }}
             th {{ background-color: #0056b3; color: white; font-weight: bold; position: sticky; top: 0; }}
             tr:nth-child(even) {{ background-color: #f2f2f2; }}
-            
-            /* Column Widths */
-            col:nth-child(1) {{ width: 150px; }} /* Sitting Date */
-            col:nth-child(2) {{ width: 150px; }} /* Source */
-            col:nth-child(3) {{ width: 220px; }} /* Speaker */
-            col:nth-child(4) {{ width: 130px; }} /* Matched Term */
-            col:nth-child(5) {{ width: auto;  }} /* Context Snippet */
-            col:nth-child(6) {{ width: 90px;  }} /* Direct Link */
-
+            col:nth-child(1) {{ width: 150px; }}
+            col:nth-child(2) {{ width: 150px; }}
+            col:nth-child(3) {{ width: 220px; }}
+            col:nth-child(4) {{ width: 130px; }}
+            col:nth-child(5) {{ width: auto;  }}
+            col:nth-child(6) {{ width: 90px;  }}
             td:nth-child(3) {{ font-weight: bold; color: #2c3e50; }}
             td:nth-child(4) {{ font-weight: bold; color: #d9534f; }}
-            
             a {{ color: #0056b3; text-decoration: none; font-weight: bold; }}
             a:hover {{ text-decoration: underline; }}
         </style>
@@ -134,7 +153,6 @@ def generate_styled_html(df: pd.DataFrame, output_file: str):
             </thead>
             <tbody>
     """
-    
     for _, row in df.iterrows():
         url_display = row['quote_url']
         if not str(url_display).startswith('<a'):
@@ -165,18 +183,25 @@ def fetch_and_parse():
     seen_matches = set()
     compiled_regexes = [(kw, re.compile(kw, re.IGNORECASE)) for kw in KEYWORDS]
 
-    for source in SOURCES:
-        print(f"\n==================================================")
-        print(f"  Fetching: {source['name']}")
-        print(f"==================================================")
+    session = requests.Session()
+    adapter = requests.adapters.HTTPAdapter(max_retries=3)
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+
+    # 1. Gather recent sitting publication targets
+    hoc_urls = get_recent_hansard_urls(session, max_issues=8)
+    
+    target_list = [{"name": "House of Commons (Hansard)", "url": u} for u in hoc_urls]
+    target_list.append({"name": "Senate Debates", "url": "https://sencanada.ca/en/in-the-chamber/debates/"})
+
+    for source in target_list:
+        print(f"\nFetching: {source['name']} -> {source['url']}")
         
-        session = requests.Session()
         try:
-            # Set short timeout & allow fallback if source site is unresponsive
-            resp = session.get(source["url"], headers=HEADERS, timeout=8)
+            resp = session.get(source["url"], headers=HEADERS, timeout=25)
             resp.raise_for_status()
         except Exception as e:
-            print(f"  [NOTICE] Connection skipped for {source['name']}: {e}")
+            print(f"  [NOTICE] Connection skipped for {source['url']}: {e}")
             continue
 
         soup = BeautifulSoup(resp.text, "html.parser")
@@ -195,57 +220,51 @@ def fetch_and_parse():
         current_speaker = "Unknown Speaker"
 
         for block in interventions:
-            block_text = clean_text(block.get_text())
-            
-            if len(block_text) < 50 or len(block_text) > 2000:
-                continue
-
-            if "Publication Selector by Date" in block_text or "Parliamentary Historical Resources" in block_text:
-                continue
+            paragraphs = block.find_all('p')
+            if not paragraphs:
+                paragraphs = [block]
 
             anchor_id = block.get("id") or block.get("data-id")
-            if anchor_id:
-                quote_url = f"{source['url']}#{anchor_id}"
-            else:
-                quote_url = source['url']
+            quote_url = f"{source['url']}#{anchor_id}" if anchor_id else source['url']
 
             detected_speaker = extract_speaker_name(block)
             if detected_speaker != "Unknown Speaker":
                 current_speaker = detected_speaker
 
-            sentences = [s.strip() for s in re.split(r'(?<=[.!?]) +', block_text) if s.strip()]
-
-            for idx, sentence in enumerate(sentences):
-                sentence_key = (source["name"], sitting_date, current_speaker, sentence)
-                if sentence_key in seen_matches:
+            for p in paragraphs:
+                p_text = clean_text(p.get_text())
+                if len(p_text) < 15 or len(p_text) > 50000:
                     continue
 
-                for raw_keyword, regex in compiled_regexes:
-                    match = regex.search(sentence)
-                    if match:
-                        prev_s = sentences[idx - 1] if idx > 0 else ""
-                        next_s = sentences[idx + 1] if idx < len(sentences) - 1 else ""
-                        
-                        context_snippet = f"{prev_s} [{sentence}] {next_s}".strip()
-                        matched_word = match.group(0)
+                if "Publication Selector by Date" in p_text or "Parliamentary Historical Resources" in p_text:
+                    continue
 
-                        seen_matches.add(sentence_key)
+                sentences = [s.strip() for s in re.split(r'(?<=[.!?]) +', p_text) if s.strip()]
 
-                        print(f"\n📍 SITTING DATE : {sitting_date}")
-                        print(f"👤 SPEAKER      : {current_speaker}")
-                        print(f"🔑 MATCH        : '{matched_word}'")
-                        print(f"🔗 DIRECT LINK  : {quote_url}")
-                        print("-" * 50)
+                for idx, sentence in enumerate(sentences):
+                    sentence_key = (source["name"], sitting_date, current_speaker, sentence)
+                    if sentence_key in seen_matches:
+                        continue
 
-                        results.append({
-                            "sitting_date": sitting_date,
-                            "source": source["name"],
-                            "speaker": current_speaker,
-                            "matched_term": matched_word,
-                            "context_snippet": context_snippet,
-                            "quote_url": quote_url
-                        })
-                        break
+                    for raw_keyword, regex in compiled_regexes:
+                        match = regex.search(sentence)
+                        if match:
+                            prev_s = sentences[idx - 1] if idx > 0 else ""
+                            next_s = sentences[idx + 1] if idx < len(sentences) - 1 else ""
+                            context_snippet = f"{prev_s} [{sentence}] {next_s}".strip()
+                            matched_word = match.group(0)
+
+                            seen_matches.add(sentence_key)
+
+                            results.append({
+                                "sitting_date": sitting_date,
+                                "source": source["name"],
+                                "speaker": current_speaker,
+                                "matched_term": matched_word,
+                                "context_snippet": context_snippet,
+                                "quote_url": quote_url
+                            })
+                            break
 
     os.makedirs("data", exist_ok=True)
     csv_path = "data/hansard_mentions.csv"
@@ -253,15 +272,10 @@ def fetch_and_parse():
 
     df_new = pd.DataFrame(results) if results else pd.DataFrame(columns=["sitting_date", "source", "speaker", "matched_term", "context_snippet", "quote_url"])
 
-    # Load existing historical data and append new records cleanly
     if os.path.exists(csv_path):
         try:
             existing_df = pd.read_csv(csv_path)
-            if "sitting_date" not in existing_df.columns or existing_df["sitting_date"].isna().any():
-                combined_df = df_new
-            else:
-                combined_df = pd.concat([existing_df, df_new], ignore_index=True)
-                
+            combined_df = pd.concat([existing_df, df_new], ignore_index=True)
             combined_df.drop_duplicates(subset=["sitting_date", "source", "speaker", "context_snippet"], inplace=True)
             combined_df.to_csv(csv_path, index=False)
         except Exception:
@@ -269,11 +283,11 @@ def fetch_and_parse():
     else:
         df_new.to_csv(csv_path, index=False)
 
-    # Rebuild index.html report cleanly
     if os.path.exists(csv_path):
         full_df = pd.read_csv(csv_path)
+        full_df = full_df.iloc[::-1].reset_index(drop=True)
         generate_styled_html(full_df, html_path)
-        print(f"\n Clean history report generated ({len(full_df)} total mentions): {html_path}")
+        print(f"\nReport updated: {html_path} ({len(full_df)} total mentions across recent sitting issues)")
 
 if __name__ == "__main__":
     fetch_and_parse()
