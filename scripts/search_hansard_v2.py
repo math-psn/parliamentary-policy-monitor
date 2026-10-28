@@ -68,38 +68,29 @@ def extract_speaker_name(tag) -> str:
 
     return "Unknown Speaker"
 
-def get_recent_hansard_urls(session, max_issues=15):
-    """Dynamically finds modern sitting links and numeric document IDs."""
+def get_recent_hansard_urls(session, max_issues=12):
+    """Finds the current sitting number and generates consecutive target URLs."""
     urls = []
-    discovery_endpoints = [
-        "https://www.ourcommons.ca/documentviewer/en/house/latest/hansard",
-        "https://www.ourcommons.ca/en/parliamentary-business"
-    ]
+    latest_url = "https://www.ourcommons.ca/documentviewer/en/house/latest/hansard"
     
-    # Matches sitting links (/sitting-155/hansard) or document IDs (/DocumentViewer/en/14200934)
-    link_regex = re.compile(r"/documentviewer/en/(?:house/latest/hansard|\d+-\d+/house/sitting-\d+/hansard|\d+)", re.I)
-
-    for feed in discovery_endpoints:
-        try:
-            resp = session.get(feed, headers=HEADERS, timeout=25)
-            if resp.status_code == 200:
-                soup = BeautifulSoup(resp.text, "html.parser")
-                for a in soup.find_all("a", href=link_regex):
-                    href = a["href"]
-                    full_link = href if href.startswith("http") else f"{BASE_URL}{href}"
-                    # Avoid anchors and dupes
-                    full_link = full_link.split("#")[0].split("?")[0]
-                    if full_link not in urls:
-                        urls.append(full_link)
-                    if len(urls) >= max_issues:
-                        break
-            if len(urls) >= max_issues:
-                break
-        except Exception as e:
-            print(f"Notice during link retrieval: {e}")
-
-    if not urls:
-        urls = ["https://www.ourcommons.ca/documentviewer/en/house/latest/hansard"]
+    try:
+        resp = session.get(latest_url, headers=HEADERS, timeout=25, allow_redirects=True)
+        final_url = resp.url
+        
+        # Check if the final URL resolved to a numbered sitting (e.g. sitting-156)
+        match = re.search(r"/(\d+-\d+)/house/sitting-(\d+)/hansard", final_url, re.I)
+        if match:
+            session_id = match.group(1) # e.g. 45-1
+            latest_num = int(match.group(2))
+            
+            # Generate the last N consecutive sitting URLs
+            for num in range(latest_num, max(0, latest_num - max_issues), -1):
+                urls.append(f"https://www.ourcommons.ca/documentviewer/en/{session_id}/house/sitting-{num}/hansard")
+        else:
+            urls.append(latest_url)
+    except Exception as e:
+        print(f"Notice determining current sitting: {e}")
+        urls.append(latest_url)
         
     return urls
 
@@ -186,15 +177,17 @@ def fetch_and_parse():
     session.mount("https://", adapter)
     session.mount("http://", adapter)
 
-    hoc_urls = get_recent_hansard_urls(session, max_issues=15)
+    hoc_urls = get_recent_hansard_urls(session, max_issues=12)
     target_list = [{"name": "House of Commons (Hansard)", "url": u} for u in hoc_urls]
     target_list.append({"name": "Senate Debates", "url": "https://sencanada.ca/en/in-the-chamber/debates/"})
 
     for source in target_list:
         print(f"\nFetching: {source['name']} -> {source['url']}")
         try:
-            resp = session.get(source["url"], headers=HEADERS, timeout=30)
-            resp.raise_for_status()
+            resp = session.get(source["url"], headers=HEADERS, timeout=25)
+            if resp.status_code != 200:
+                print(f"  [NOTICE] Skipped (status {resp.status_code}): {source['url']}")
+                continue
         except Exception as e:
             print(f"  [NOTICE] Connection skipped for {source['url']}: {e}")
             continue
