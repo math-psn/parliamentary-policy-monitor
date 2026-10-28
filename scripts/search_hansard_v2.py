@@ -5,23 +5,8 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
 
-# Base URL for Canadian Parliament Hansard publications
 BASE_URL = "https://www.ourcommons.ca"
-PUBLICATION_LIST_URL = "https://www.ourcommons.ca/documentviewer/en/house/44-1/hansard"
 
-# Fallback direct endpoints
-SOURCES = [
-    {
-        "name": "House of Commons (Latest)",
-        "url": "https://www.ourcommons.ca/documentviewer/en/house/latest/hansard",
-    },
-    {
-        "name": "Senate Debates",
-        "url": "https://sencanada.ca/en/in-the-chamber/debates/",
-    }
-]
-
-# Targeted Keywords
 KEYWORDS = [
     r"\bcharit(y|ies|able|ables)\b",
     r"\bvolunt(eer|eers|eers'|ary|eerism)\b",
@@ -83,26 +68,39 @@ def extract_speaker_name(tag) -> str:
 
     return "Unknown Speaker"
 
-def get_recent_hansard_urls(session, max_issues=8):
-    """Scrapes the publication list to gather the last N sitting publications."""
+def get_recent_hansard_urls(session, max_issues=15):
+    """Dynamically finds modern sitting links and numeric document IDs."""
     urls = []
-    try:
-        resp = session.get(PUBLICATION_LIST_URL, headers=HEADERS, timeout=20)
-        if resp.status_code == 200:
-            soup = BeautifulSoup(resp.text, "html.parser")
-            # Locate publication links inside selector dropdown or document index
-            for a in soup.find_all("a", href=re.compile(r"/documentviewer/en/house/\d+-\d+/hansard/\d+", re.I)):
-                full_url = a["href"] if a["href"].startswith("http") else f"{BASE_URL}{a['href']}"
-                if full_url not in urls:
-                    urls.append(full_url)
-                if len(urls) >= max_issues:
-                    break
-    except Exception as e:
-        print(f"Notice: Could not dynamically list publications: {e}")
+    discovery_endpoints = [
+        "https://www.ourcommons.ca/documentviewer/en/house/latest/hansard",
+        "https://www.ourcommons.ca/en/parliamentary-business"
+    ]
+    
+    # Matches sitting links (/sitting-155/hansard) or document IDs (/DocumentViewer/en/14200934)
+    link_regex = re.compile(r"/documentviewer/en/(?:house/latest/hansard|\d+-\d+/house/sitting-\d+/hansard|\d+)", re.I)
 
-    # Fallback to default sources if list parsing returns empty
+    for feed in discovery_endpoints:
+        try:
+            resp = session.get(feed, headers=HEADERS, timeout=25)
+            if resp.status_code == 200:
+                soup = BeautifulSoup(resp.text, "html.parser")
+                for a in soup.find_all("a", href=link_regex):
+                    href = a["href"]
+                    full_link = href if href.startswith("http") else f"{BASE_URL}{href}"
+                    # Avoid anchors and dupes
+                    full_link = full_link.split("#")[0].split("?")[0]
+                    if full_link not in urls:
+                        urls.append(full_link)
+                    if len(urls) >= max_issues:
+                        break
+            if len(urls) >= max_issues:
+                break
+        except Exception as e:
+            print(f"Notice during link retrieval: {e}")
+
     if not urls:
-        urls = [s["url"] for s in SOURCES if "house" in s["name"].lower()]
+        urls = ["https://www.ourcommons.ca/documentviewer/en/house/latest/hansard"]
+        
     return urls
 
 def generate_styled_html(df: pd.DataFrame, output_file: str):
@@ -188,17 +186,14 @@ def fetch_and_parse():
     session.mount("https://", adapter)
     session.mount("http://", adapter)
 
-    # 1. Gather recent sitting publication targets
-    hoc_urls = get_recent_hansard_urls(session, max_issues=8)
-    
+    hoc_urls = get_recent_hansard_urls(session, max_issues=15)
     target_list = [{"name": "House of Commons (Hansard)", "url": u} for u in hoc_urls]
     target_list.append({"name": "Senate Debates", "url": "https://sencanada.ca/en/in-the-chamber/debates/"})
 
     for source in target_list:
         print(f"\nFetching: {source['name']} -> {source['url']}")
-        
         try:
-            resp = session.get(source["url"], headers=HEADERS, timeout=25)
+            resp = session.get(source["url"], headers=HEADERS, timeout=30)
             resp.raise_for_status()
         except Exception as e:
             print(f"  [NOTICE] Connection skipped for {source['url']}: {e}")
