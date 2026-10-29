@@ -9,7 +9,7 @@ BASE_URL = "https://www.ourcommons.ca"
 
 KEYWORDS = [
     r"\bcharit(y|ies|able|ables)\b",
-    r"\bvolunt(eer|eers|eers'|ary|eerism)\b",
+    r"\bvolunt(eer|eers|eers'|eering|ary|eerism)\b",
     r"\bNGOs?'?\b",
     r"\bnon-?for-?profits?'?\b",
     r"\bnot-?for-?profits?'?\b",

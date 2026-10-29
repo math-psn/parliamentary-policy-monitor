@@ -2,8 +2,10 @@ name: Daily Parliamentary Sector Monitor
 
 on:
   schedule:
-    # 8:00 AM EST (12:00 UTC) every weekday
-    - cron: '0 12 * * 1-5'
+    # 8:17 AM EST (13:17 UTC) and 5:17 PM EST (22:17 UTC) on weekdays
+    # (Using minute 17 avoids GitHub's top-of-the-hour runner queue delays)
+    - cron: '17 13 * * 1-5'
+    - cron: '17 22 * * 1-5'
   workflow_dispatch:
 
 jobs:
@@ -16,6 +18,8 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -40,4 +44,4 @@ jobs:
           git add data/hansard_mentions.csv index.html .nojekyll || true
           git commit -m "Automated daily Hansard update" || exit 0
           git pull --rebase origin main
-          git push
+          git push origin main
